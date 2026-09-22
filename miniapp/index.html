@@ -12,7 +12,8 @@
     .hud span { padding:7px 10px; border-radius:12px; background:#282d42 }
     #board { display:grid; grid-template-columns:repeat(8,1fr); gap:3px; padding:6px; border-radius:14px; background:#343049; touch-action:none }
     .cell { aspect-ratio:1; display:grid; place-items:center; font-size:clamp(20px,6vw,34px); border-radius:7px; background:#383550; position:relative; user-select:none }
-    .wall { background:#1b1d2d } .rock { background:#635049 } .exit { background:#245a52 } .scanner { background:#714558 }
+    .wall { background:#1b1d2d } .earth { background:#65493c } .rock { background:#776358 } .exit { background:#245a52 } .scanner { background:#714558 }
+    .trail { box-shadow:inset 0 0 0 2px #e6bd70 }
     .danger::after { content:""; position:absolute; inset:2px; border:2px dashed #ff5e72; border-radius:6px; pointer-events:none }
     #message { min-height:3em; padding:12px; margin:12px 0; border-radius:12px; background:#272b40 }
     .controls { display:grid; grid-template-columns:repeat(3,60px); justify-content:center; gap:5px }
@@ -28,7 +29,7 @@
 <body>
 <main>
   <h1>⛏️ Super Piluka: el misterio de la mina</h1>
-  <p>Super Piluka busca gemas y prisioneros entre piedras y bombas. Cuando la misión de una planta está casi terminada aparece su amigo: un minero atrapado que conoce los secretos de la mina y lo ayuda a bajar.</p>
+  <p>La mina está cerrada: Super Piluka debe picar la tierra para abrir túneles, encontrar gemas y rescatar prisioneros. Cuando la misión está casi terminada, su amigo minero atrapado le traza una ruta.</p>
   <div class="hud"><span id="floor"></span><span id="mission"></span><span id="rescued"></span><span id="gems"></span><span id="hearts"></span><span id="stars"></span></div>
   <div id="board" role="grid" aria-label="Laberinto de la mina"></div>
   <div id="message" role="status" aria-live="polite"></div>
@@ -45,15 +46,15 @@
     <button class="right" data-dir="1,0" aria-label="Derecha">→</button>
   </div>
   <button class="restart" id="restart">Empezar de nuevo</button>
-  <small>Flechas o WASD para moverte. Selecciona una herramienta y avanza hacia una piedra para usarla. Los útiles están ocultos bajo algunas rocas.</small>
+  <small>Flechas o WASD para moverte. Avanza hacia la tierra o una piedra para picar. Selecciona pico, taladro o dinamita cuando los encuentres bajo las rocas.</small>
 </main>
 <script>
 (() => {
   'use strict';
   const maps = [
-    ["########","#P.r.G.#","#b##.#C#","#..s.#.#","##.#...#","#R..#..#","#..C.GE#","########"],
-    ["########","#P.G#C.#","#.#r#..#","#s#....#","#..##R.#","##...G##","#C.br.E#","########"],
-    ["########","#P..r.G#","#.#.#C##","#s..#..#","##R#...#","#G.r.#C#","#..b..E#","########"]
+    ["########","#P#r.G.#","###..#C#","#b.s.#.#","##.#...#","#R..#..#","#..C.GE#","########"],
+    ["########","#P#G#C.#","###r#..#","#s#....#","#..##R.#","##...G##","#C.br.E#","########"],
+    ["########","#P#.r.G#","###.#C##","#s..#..#","##R#...#","#G.r.#C#","#..b..E#","########"]
   ];
   const board = document.querySelector('#board');
   const msg = document.querySelector('#message');
@@ -64,7 +65,7 @@
   const inside = (x,y) => x>=0 && x<8 && y>=0 && y<8;
   const cell = (x,y) => state.tiles[y][x];
   function load(level, hearts=3, stars=0, rescued=0, gems=0) {
-    const tiles=maps[level].map(row=>row.split(''));
+    const tiles=maps[level].map((row,y)=>row.split('').map((tile,x)=>tile==='#' && (x===0||x===7||y===0||y===7)?'X':tile));
     const enemies=[]; let player, exit;
     for(let y=0;y<8;y++) for(let x=0;x<8;x++) {
       const t=tiles[y][x];
@@ -72,21 +73,49 @@
       if(t==='E') { exit={x,y}; tiles[y][x]='.'; }
       if(t==='R'||t==='s') { enemies.push({x,y,type:t,axis:t==='s'?'row':'patrol',direction:1}); tiles[y][x]='.'; }
     }
-    state={level,tiles,enemies,player,exit,hearts,stars,rescued,gems,turn:0,invulnerable:0,finished:false,tool:'hand',inventory:{pick:0,drill:0,dynamite:0}};
-    announce(level===0?'Planta 1: rescata a los prisioneros y recoge todas las gemas para activar el ascensor.':`Planta ${level+1}: nueva misión, más cerca del misterio.`);
+    state={level,tiles,enemies,player,exit,hearts,stars,rescued,gems,turn:0,invulnerable:0,finished:false,tool:'hand',inventory:{pick:0,drill:0,dynamite:0},trail:new Set()};
+    announce(level===0?'La entrada está bloqueada. Pica la tierra para abrir tu primer túnel.':`Planta ${level+1}: abre camino para completar la misión.`);
     draw();
   }
   function announce(text) { msg.textContent=text; }
   function pending() { return state.tiles.flat().filter(t=>t==='C'||t==='G').length; }
+  function guidePath() {
+    const target=pending()===1 ? (()=>{
+      for(let y=1;y<7;y++) for(let x=1;x<7;x++) if('CG'.includes(cell(x,y))) return {x,y};
+    })() : state.player;
+    if(!target) return;
+    const start=state.exit, open=[{...start,cost:0}], best=new Map([[key(start.x,start.y),0]]), previous=new Map();
+    while(open.length) {
+      open.sort((a,b)=>a.cost-b.cost);
+      const current=open.shift();
+      if(current.cost!==best.get(key(current.x,current.y))) continue;
+      if(same(current,target)) break;
+      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        const x=current.x+dx,y=current.y+dy;
+        if(!inside(x,y)||cell(x,y)==='X') continue;
+        const cost=current.cost+(cell(x,y)==='#'||cell(x,y)==='r'?3:1)+(cell(x,y)==='b'?5:0);
+        if(cost>=(best.get(key(x,y))??Infinity)) continue;
+        best.set(key(x,y),cost); previous.set(key(x,y),{x:current.x,y:current.y});open.push({x,y,cost});
+      }
+    }
+    let at=target;
+    state.trail=new Set();
+    while(at && !same(at,start)) {
+      state.trail.add(key(at.x,at.y));
+      if(cell(at.x,at.y)==='#'||cell(at.x,at.y)==='r') state.tiles[at.y][at.x]='.';
+      at=previous.get(key(at.x,at.y));
+    }
+  }
   function useTool(target,dx,dy) {
     const item=state.tool;
     if(item!=='hand' && state.inventory[item]===0) { announce('Busca más herramientas bajo las piedras.'); return false; }
     if(item!=='hand') state.inventory[item]--;
     const clear=(x,y)=>{
-      if(!inside(x,y)||cell(x,y)!=='r') return;
+      if(!inside(x,y)||!['r','#'].includes(cell(x,y))) return;
+      const rock=cell(x,y)==='r';
       state.tiles[y][x]='.';
       // Cada planta esconde un útil bajo su primera piedra rota.
-      if(!state.foundTool) {
+      if(rock && !state.foundTool) {
         const found=['pick','drill','dynamite'][state.level];
         state.inventory[found]++; state.foundTool=true;
         announce(`¡Había un ${found==='pick'?'pico':found==='drill'?'taladro':'paquete de dinamita'} escondido bajo la roca!`);
@@ -105,7 +134,7 @@
     const marked=new Set();
     for(const e of state.enemies.filter(e=>e.type==='s')) {
       for(const dir of [-1,1]) {
-        for(let x=e.x+dir; inside(x,e.y) && cell(x,e.y)!=='#' && cell(x,e.y)!=='r'; x+=dir) marked.add(key(x,e.y));
+        for(let x=e.x+dir; inside(x,e.y) && !['#','X','r'].includes(cell(x,e.y)); x+=dir) marked.add(key(x,e.y));
       }
     }
     return marked;
@@ -125,10 +154,10 @@
       if(e.type==='s') continue;
       const tryMove=dir=>({x:e.x+dir,y:e.y});
       let next=tryMove(e.direction);
-      if(!inside(next.x,next.y)||cell(next.x,next.y)==='#'||cell(next.x,next.y)==='r') {
+      if(!inside(next.x,next.y)||['#','X','r'].includes(cell(next.x,next.y))) {
         e.direction*=-1; next=tryMove(e.direction);
       }
-      if(inside(next.x,next.y)&&cell(next.x,next.y)!=='#'&&cell(next.x,next.y)!=='r') e.x=next.x;
+      if(inside(next.x,next.y)&&!['#','X','r'].includes(cell(next.x,next.y))) e.x=next.x;
     }
   }
   function move(dx,dy) {
@@ -138,8 +167,8 @@
     const toolUsed=state.tool;
     if(!inside(target.x,target.y)) return;
     const t=cell(target.x,target.y);
-    if(t==='#') { announce('Un muro bloquea el camino.'); return; }
-    if(t==='r') { if(!useTool(target,dx,dy)) return; }
+    if(t==='X') { announce('El borde de la mina es roca sólida. Busca otra ruta.'); return; }
+    if(t==='r'||t==='#') { if(!useTool(target,dx,dy)) return; }
     else {
       state.player=target;
       if(t==='C') { state.rescued++; state.tiles[target.y][target.x]='.'; announce('¡Prisionero liberado! Te cuenta que el núcleo oculta un secreto.'); }
@@ -150,9 +179,14 @@
     }
     if(state.finished) { draw(); return; }
     state.turn++; if(state.invulnerable>0) state.invulnerable--;
-    if(!(t==='r' && toolUsed==='pick')) enemiesMove();
+    if(!((t==='r'||t==='#') && toolUsed==='pick')) enemiesMove();
     danger();
-    if(!state.finished && remainingBefore>1 && pending()===1) announce('¡Queda un objetivo! Tu amigo, el minero atrapado que conoce la mina, aparece junto al ascensor y te indica el camino.');
+    if(!state.finished && remainingBefore>1 && pending()===1) {
+      guidePath(); announce('¡Queda un objetivo! Aparece tu amigo minero atrapado y abre la ruta dorada hacia lo que falta.');
+    }
+    if(!state.finished && remainingBefore===1 && pending()===0) {
+      guidePath(); announce('¡Misión completa! El minero traza la ruta dorada hasta el ascensor.');
+    }
     if(!state.finished && same(state.player,state.exit)) {
       if(pending()>0) announce('El ascensor espera: rescata a todos y recoge todas las gemas antes de bajar.');
       else if(state.level===maps.length-1) {
@@ -171,17 +205,18 @@
     const beams=scannerCells(); board.replaceChildren();
     for(const item of ['pick','drill','dynamite']) document.querySelector(`#${item}-count`).textContent=state.inventory[item];
     document.querySelectorAll('[data-tool]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.tool===state.tool)));
-    const icons={'#':'','r':'🪨','C':'🔒','G':'💎','b':'💣','.':''};
+    const icons={'X':'','r':'🪨','#':'🟫','C':'🔒','G':'💎','b':'💣','.':''};
     for(let y=0;y<8;y++) for(let x=0;x<8;x++) {
       const p={x,y}, tile=cell(x,y), e=state.enemies.find(e=>same(e,p));
-      const el=document.createElement('div'); el.className=`cell ${tile==='#'?'wall':tile==='r'?'rock':''}`;
+      const el=document.createElement('div'); el.className=`cell ${tile==='X'?'wall':tile==='#'?'earth':tile==='r'?'rock':''}`;
+      if(state.trail.has(key(x,y))) el.classList.add('trail');
       if(same(p,state.exit)) el.classList.add('exit');
       if(e?.type==='s') el.classList.add('scanner');
       if(beams.has(key(x,y))) el.classList.add('danger');
       el.textContent=same(p,state.player)?'🦸':e?(e.type==='s'?'🤖':'👷‍♂️'):same(p,state.exit)?(pending()<=1?'👷':'⬇️'):icons[tile];
       el.setAttribute('role','gridcell');
-      el.setAttribute('aria-label',same(p,state.player)?'Super Piluka':e?(e.type==='s'?'Robot escáner':'Minero rojo'):same(p,state.exit)?(pending()<=1?'Amigo minero atrapado junto al ascensor':'Ascensor de descenso'):tile==='C'?'Prisionero':tile==='G'?'Gema':tile==='b'?'Bomba':tile==='r'?'Roca':tile==='#'?'Muro':'Pasillo');
-      if(tile==='r') el.addEventListener('click',()=>{if(adjacent(state.player,p)) move(x-state.player.x,y-state.player.y);});
+      el.setAttribute('aria-label',same(p,state.player)?'Super Piluka':e?(e.type==='s'?'Robot escáner':'Minero rojo'):same(p,state.exit)?(pending()<=1?'Amigo minero atrapado junto al ascensor':'Ascensor de descenso'):tile==='C'?'Prisionero':tile==='G'?'Gema':tile==='b'?'Bomba':tile==='r'?'Piedra':tile==='#'?'Tierra para picar':tile==='X'?'Roca sólida':'Pasillo');
+      if(tile==='r'||tile==='#') el.addEventListener('click',()=>{if(adjacent(state.player,p)) move(x-state.player.x,y-state.player.y);});
       board.append(el);
     }
   }
