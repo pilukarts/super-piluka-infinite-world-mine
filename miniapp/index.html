@@ -28,7 +28,7 @@
 <body>
 <main>
   <h1>⛏️ Super Piluka: el misterio de la mina</h1>
-  <p>El fantasma minero guía a Super Piluka por cada planta. Busca gemas y prisioneros entre piedras y bombas. El minero aliado llegará cuando la misión esté casi terminada.</p>
+  <p>Super Piluka busca gemas y prisioneros entre piedras y bombas. Cuando la misión de una planta está casi terminada aparece su amigo: un minero atrapado que conoce los secretos de la mina y lo ayuda a bajar.</p>
   <div class="hud"><span id="floor"></span><span id="mission"></span><span id="rescued"></span><span id="gems"></span><span id="hearts"></span><span id="stars"></span></div>
   <div id="board" role="grid" aria-label="Laberinto de la mina"></div>
   <div id="message" role="status" aria-live="polite"></div>
@@ -72,7 +72,7 @@
       if(t==='E') { exit={x,y}; tiles[y][x]='.'; }
       if(t==='R'||t==='s') { enemies.push({x,y,type:t,axis:t==='s'?'row':'patrol',direction:1}); tiles[y][x]='.'; }
     }
-    state={level,tiles,enemies,player,ghost:{...player},exit,hearts,stars,rescued,gems,turn:0,invulnerable:0,finished:false,tool:'hand',inventory:{pick:0,drill:0,dynamite:0}};
+    state={level,tiles,enemies,player,exit,hearts,stars,rescued,gems,turn:0,invulnerable:0,finished:false,tool:'hand',inventory:{pick:0,drill:0,dynamite:0}};
     announce(level===0?'Planta 1: rescata a los prisioneros y recoge todas las gemas para activar el ascensor.':`Planta ${level+1}: nueva misión, más cerca del misterio.`);
     draw();
   }
@@ -80,7 +80,7 @@
   function pending() { return state.tiles.flat().filter(t=>t==='C'||t==='G').length; }
   function useTool(target,dx,dy) {
     const item=state.tool;
-    if(item!=='hand' && state.inventory[item]===0) { announce('El fantasma dice: busca más herramientas bajo las piedras.'); return false; }
+    if(item!=='hand' && state.inventory[item]===0) { announce('Busca más herramientas bajo las piedras.'); return false; }
     if(item!=='hand') state.inventory[item]--;
     const clear=(x,y)=>{
       if(!inside(x,y)||cell(x,y)!=='r') return;
@@ -141,10 +141,10 @@
     if(t==='#') { announce('Un muro bloquea el camino.'); return; }
     if(t==='r') { if(!useTool(target,dx,dy)) return; }
     else {
-      state.ghost={...state.player}; state.player=target;
+      state.player=target;
       if(t==='C') { state.rescued++; state.tiles[target.y][target.x]='.'; announce('¡Prisionero liberado! Te cuenta que el núcleo oculta un secreto.'); }
       else if(t==='G') { state.gems++; state.tiles[target.y][target.x]='.'; announce('¡Gema recogida! Sirve para activar el ascensor de esta planta.'); }
-      else if(t==='b') { state.tiles[target.y][target.x]='.'; state.hearts--; announce('¡Bomba escondida! El fantasma te avisa, pero pierdes un corazón.'); if(state.hearts<=0) { state.finished=true; announce('La bomba te ha detenido. ¡Inténtalo de nuevo!'); } }
+      else if(t==='b') { state.tiles[target.y][target.x]='.'; state.hearts--; announce('¡Bomba escondida! Pierdes un corazón.'); if(state.hearts<=0) { state.finished=true; announce('La bomba te ha detenido. ¡Inténtalo de nuevo!'); } }
       else if(t==='.') announce('Avanzas por los túneles.');
       if(t==='.' && (state.turn+target.x+target.y)%7===0) { state.stars++; announce('¡Encontraste una estrella entre el polvo!'); }
     }
@@ -152,9 +152,9 @@
     state.turn++; if(state.invulnerable>0) state.invulnerable--;
     if(!(t==='r' && toolUsed==='pick')) enemiesMove();
     danger();
-    if(!state.finished && remainingBefore>1 && pending()===1) announce('¡Queda un solo objetivo! El minero aliado aparece junto al ascensor para ayudarte a bajar.');
+    if(!state.finished && remainingBefore>1 && pending()===1) announce('¡Queda un objetivo! Tu amigo, el minero atrapado que conoce la mina, aparece junto al ascensor y te indica el camino.');
     if(!state.finished && same(state.player,state.exit)) {
-      if(pending()>0) announce('El fantasma señala lo que falta: rescata a todos y recoge todas las gemas antes de bajar.');
+      if(pending()>0) announce('El ascensor espera: rescata a todos y recoge todas las gemas antes de bajar.');
       else if(state.level===maps.length-1) {
         state.finished=true; announce('¡Llegasteis al Núcleo Infinito! Los prisioneros están a salvo. Una luz de Pilukium revela una puerta sellada... Continuará.');
       } else { load(state.level+1,state.hearts,state.stars,state.rescued,state.gems); return; }
@@ -178,9 +178,9 @@
       if(same(p,state.exit)) el.classList.add('exit');
       if(e?.type==='s') el.classList.add('scanner');
       if(beams.has(key(x,y))) el.classList.add('danger');
-      el.textContent=same(p,state.player)?'🦸':e?(e.type==='s'?'🤖':'👷‍♂️'):same(p,state.ghost)?'👻':same(p,state.exit)?(pending()<=1?'👷':'⬇️'):icons[tile];
+      el.textContent=same(p,state.player)?'🦸':e?(e.type==='s'?'🤖':'👷‍♂️'):same(p,state.exit)?(pending()<=1?'👷':'⬇️'):icons[tile];
       el.setAttribute('role','gridcell');
-      el.setAttribute('aria-label',same(p,state.player)?'Super Piluka':e?(e.type==='s'?'Robot escáner':'Minero rojo'):same(p,state.ghost)?'Fantasma minero guía':same(p,state.exit)?(pending()<=1?'Minero aliado junto al ascensor':'Ascensor de descenso'):tile==='C'?'Prisionero':tile==='G'?'Gema':tile==='b'?'Bomba':tile==='r'?'Roca':tile==='#'?'Muro':'Pasillo');
+      el.setAttribute('aria-label',same(p,state.player)?'Super Piluka':e?(e.type==='s'?'Robot escáner':'Minero rojo'):same(p,state.exit)?(pending()<=1?'Amigo minero atrapado junto al ascensor':'Ascensor de descenso'):tile==='C'?'Prisionero':tile==='G'?'Gema':tile==='b'?'Bomba':tile==='r'?'Roca':tile==='#'?'Muro':'Pasillo');
       if(tile==='r') el.addEventListener('click',()=>{if(adjacent(state.player,p)) move(x-state.player.x,y-state.player.y);});
       board.append(el);
     }
