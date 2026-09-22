@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Super Piluka · El misterio de la mina</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background:#111421; color:#f9ebd2; }
+    * { box-sizing:border-box } body { margin:0; padding:16px; }
+    main { max-width:560px; margin:auto } h1 { font-size:1.6rem; margin:8px 0 }
+    p { line-height:1.45 } .hud { display:flex; flex-wrap:wrap; gap:8px; margin:14px 0 }
+    .hud span { padding:7px 10px; border-radius:12px; background:#282d42 }
+    #board { display:grid; grid-template-columns:repeat(8,1fr); gap:3px; padding:6px; border-radius:14px; background:#343049; touch-action:none }
+    .cell { aspect-ratio:1; display:grid; place-items:center; font-size:clamp(20px,6vw,34px); border-radius:7px; background:#383550; position:relative; user-select:none }
+    .wall { background:#1b1d2d } .earth { background:#65493c } .rock { background:#776358 } .exit { background:#245a52 } .scanner { background:#714558 }
+    .trail { box-shadow:inset 0 0 0 2px #e6bd70 }
+    .danger::after { content:""; position:absolute; inset:2px; border:2px dashed #ff5e72; border-radius:6px; pointer-events:none }
+    #message { min-height:3em; padding:12px; margin:12px 0; border-radius:12px; background:#272b40 }
+    .controls { display:grid; grid-template-columns:repeat(3,60px); justify-content:center; gap:5px }
+    button { border:0; border-radius:12px; padding:12px; background:#7058c4; color:white; font-size:20px; cursor:pointer }
+    button:focus-visible { outline:3px solid #fbc968 } .up { grid-column:2 } .left { grid-column:1 } .down { grid-column:2 } .right { grid-column:3 }
+    .restart { display:block; margin:12px auto; font-size:15px; background:#3f4964 }
+    .tools { display:flex; flex-wrap:wrap; justify-content:center; gap:6px; margin:12px 0 }
+    .tools button { font-size:14px; padding:9px; background:#414866 }
+    .tools button[aria-pressed="true"] { background:#a56a35; outline:2px solid #ffd988 }
+    #chamber { margin:12px 0; padding:16px; border:2px solid #b79257; border-radius:14px; background:#302b36 }
+    #chamber[hidden] { display:none }
+    .lamps { display:flex; gap:8px; justify-content:center; margin:12px 0 }
+    .lamps button { background:#514760; min-width:54px }
+    .lamps button.on { background:#bd914b }
+    small { color:#bdbbd0 }
+  </style>
+</head>
+<body>
+<main>
+  <h1>⛏️ Super Piluka: el misterio de la mina</h1>
+  <p>Excava bloque a bloque. Entre las gemas y las rocas encontrarás prisioneros con historias sobre lo que oculta esta mina. Rescátalos y baja con ayuda de tu amigo minero atrapado.</p>
+  <div class="hud"><span id="floor"></span><span id="mission"></span><span id="rescued"></span><span id="gems"></span><span id="hearts"></span><span id="stars"></span></div>
+  <div id="board" role="grid" aria-label="Laberinto de la mina"></div>
+  <section id="chamber" hidden aria-label="Juego de la cámara del tesoro">
+    <h2>🏛️ Cámara del tesoro</h2>
+    <p>Un juego aparte: enciende las cuatro lámparas. Cada palanca cambia su lámpara y la siguiente.</p>
+    <div class="lamps" id="lamps"></div>
+    <button id="leave-chamber">Volver a la mina</button>
+  </section>
+  <div id="message" role="status" aria-live="polite"></div>
+  <div class="tools" aria-label="Herramientas">
+    <button data-tool="hand" aria-pressed="true">⛏️ Pico básico</button>
+    <button data-tool="pick" aria-pressed="false">⚒️ Pico <span id="pick-count">0</span></button>
+    <button data-tool="drill" aria-pressed="false">🛠️ Taladro <span id="drill-count">0</span></button>
+    <button data-tool="dynamite" aria-pressed="false">🧨 Dinamita <span id="dynamite-count">0</span></button>
+  </div>
+  <div class="controls" aria-label="Movimiento">
+    <button class="up" data-dir="0,-1" aria-label="Arriba">↑</button>
+    <button class="left" data-dir="-1,0" aria-label="Izquierda">←</button>
+    <button class="down" data-dir="0,1" aria-label="Abajo">↓</button>
+    <button class="right" data-dir="1,0" aria-label="Derecha">→</button>
+  </div>
+  <button class="restart" id="restart">Empezar de nuevo</button>
+  <small>Cada pulsación mueve una casilla o pica un bloque vecino. Pulsa otra vez para entrar en el hueco. Flechas, WASD o botones; las herramientas se seleccionan arriba.</small>
+</main>
+<script>
+(() => {
+  'use strict';
+  const maps = [
+    ["########","#P#r.G.#","###..#C#","#b.s.#.#","##.#...#","#R.T#..#","#..C.GE#","########"],
+    ["########","#P#G#C.#","###r#..#","#s#....#","#.T##R.#","##...G##","#C.br.E#","########"],
+    ["########","#P#.r.G#","###.#C##","#s..#..#","##R#...#","#G.r.#C#","#.Tb..E#","########"]
+  ];
+  const stories = [
+    ['«Oí motores debajo de la roca. Esta mina tiene máquinas que nunca vimos.»','«Los mineros rojos vigilan una puerta con números, no una veta de gemas.»'],
+    ['«Me trajeron aquí por un ascensor de carga. Había más gente tras el muro.»','«Vi planos: estos túneles rodean un edificio enterrado.»'],
+    ['«Hay celdas al otro lado del hormigón. Necesitamos una salida para todos.»','«El minero conoce la llave del ascensor de evacuación. ¡Ve con él!»']
+  ];
+  const board = document.querySelector('#board');
+  const msg = document.querySelector('#message');
+  let state;
+  const key = (x,y) => `${x},${y}`;
+  const same = (a,b) => a.x === b.x && a.y === b.y;
+  const adjacent = (a,b) => Math.abs(a.x-b.x)+Math.abs(a.y-b.y) === 1;
+  const inside = (x,y) => x>=0 && x<8 && y>=0 && y<8;
+  const cell = (x,y) => state.tiles[y][x];
+  function load(level, hearts=3, stars=0, rescued=0, gems=0) {
+    const tiles=maps[level].map((row,y)=>row.split('').map((tile,x)=>tile==='#' && (x===0||x===7||y===0||y===7)?'X':tile));
+    const enemies=[]; let player, exit;
+    for(let y=0;y<8;y++) for(let x=0;x<8;x++) {
+      const t=tiles[y][x];
+      if(t==='P') { player={x,y}; tiles[y][x]='.'; }
+      if(t==='E') { exit={x,y}; tiles[y][x]='.'; }
+      if(t==='R'||t==='s') { enemies.push({x,y,type:t,axis:t==='s'?'row':'patrol',direction:1}); tiles[y][x]='.'; }
+    }
+    state={level,tiles,enemies,player,exit,hearts,stars,rescued,gems,turn:0,invulnerable:0,finished:false,tool:'hand',inventory:{pick:0,drill:0,dynamite:0},trail:new Set(),inChamber:false,lamps:[true,false,true,false],rescuedHere:0};
+    announce(level===0?'La entrada está bloqueada. Pica la tierra para abrir tu primer túnel.':`Planta ${level+1}: abre camino para completar la misión.`);
+    draw();
+  }
+  function announce(text) { msg.textContent=text; }
+  function pending() { return state.tiles.flat().filter(t=>t==='C'||t==='G').length; }
+  function drawChamber() {
+    document.querySelector('#chamber').hidden=!state.inChamber;
+    const lamps=document.querySelector('#lamps'); lamps.replaceChildren();
+    if(!state.inChamber) return;
+    state.lamps.forEach((on,i)=>{
+      const button=document.createElement('button');
+      button.className=on?'on':'';
+      button.textContent=on?'💡':'⚫';
+      button.setAttribute('aria-label',`Palanca ${i+1}, lámpara ${on?'encendida':'apagada'}`);
+      button.addEventListener('click',()=>{
+        state.lamps[i]=!state.lamps[i];
+        state.lamps[(i+1)%4]=!state.lamps[(i+1)%4];
+        if(state.lamps.every(Boolean)) {
+          state.inChamber=false;state.tiles[state.player.y][state.player.x]='.';state.stars+=3;
+          announce('¡Cofre abierto! Ganaste tres estrellas y regresas a la mina.');
+        }
+        draw();
+      });
+      lamps.append(button);
+    });
+  }
+  function guidePath() {
+    const target=pending()===1 ? (()=>{
+      for(let y=1;y<7;y++) for(let x=1;x<7;x++) if('CG'.includes(cell(x,y))) return {x,y};
+    })() : state.player;
+    if(!target) return;
+    const start=state.exit, open=[{...start,cost:0}], best=new Map([[key(start.x,start.y),0]]), previous=new Map();
+    while(open.length) {
+      open.sort((a,b)=>a.cost-b.cost);
+      const current=open.shift();
+      if(current.cost!==best.get(key(current.x,current.y))) continue;
+      if(same(current,target)) break;
+      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        const x=current.x+dx,y=current.y+dy;
+        if(!inside(x,y)||cell(x,y)==='X') continue;
+        const cost=current.cost+(cell(x,y)==='#'||cell(x,y)==='r'?3:1)+(cell(x,y)==='b'?5:0);
+        if(cost>=(best.get(key(x,y))??Infinity)) continue;
+        best.set(key(x,y),cost); previous.set(key(x,y),{x:current.x,y:current.y});open.push({x,y,cost});
+      }
+    }
+    let at=target;
+    state.trail=new Set();
+    while(at && !same(at,start)) {
+      state.trail.add(key(at.x,at.y));
+      if(cell(at.x,at.y)==='#'||cell(at.x,at.y)==='r') state.tiles[at.y][at.x]='.';
+      at=previous.get(key(at.x,at.y));
+    }
+  }
+  function useTool(target,dx,dy) {
+    const item=state.tool;
+    if(item!=='hand' && state.inventory[item]===0) { announce('Busca más herramientas bajo las piedras.'); return false; }
+    if(item!=='hand') state.inventory[item]--;
+    const clear=(x,y)=>{
+      if(!inside(x,y)||!['r','#'].includes(cell(x,y))) return;
+      const rock=cell(x,y)==='r';
+      state.tiles[y][x]='.';
+      // Cada planta esconde un útil bajo su primera piedra rota.
+      if(rock && !state.foundTool) {
+        const found=['pick','drill','dynamite'][state.level];
+        state.inventory[found]++; state.foundTool=true;
+        announce(`¡Había un ${found==='pick'?'pico':found==='drill'?'taladro':'paquete de dinamita'} escondido bajo la roca!`);
+      }
+    };
+    clear(target.x,target.y);
+    if(item==='drill') clear(target.x+dx,target.y+dy);
+    if(item==='dynamite') for(let y=target.y-1;y<=target.y+1;y++) for(let x=target.x-1;x<=target.x+1;x++) clear(x,y);
+    if(item==='pick') announce('El pico rompe la roca de un golpe.');
+    if(item==='drill') announce('El taladro perfora en línea recta.');
+    if(item==='dynamite') announce('La dinamita despeja las rocas cercanas.');
+    state.tool='hand';
+    return true;
+  }
+  function scannerCells() {
+    const marked=new Set();
+    for(const e of state.enemies.filter(e=>e.type==='s')) {
+      for(const dir of [-1,1]) {
+        for(let x=e.x+dir; inside(x,e.y) && !['#','X','r'].includes(cell(x,e.y)); x+=dir) marked.add(key(x,e.y));
+      }
+    }
+    return marked;
+  }
+  function danger() {
+    if(state.invulnerable>0) return false;
+    if(state.enemies.some(e=>same(e,state.player)) || scannerCells().has(key(state.player.x,state.player.y))) {
+      state.hearts--; state.invulnerable=2;
+      if(state.hearts<=0) { state.finished=true; announce('Los invasores te han detenido. ¡Vuelve a intentarlo!'); }
+      else announce('¡Cuidado! Has perdido un corazón. Tienes un turno para escapar.');
+      return true;
+    }
+    return false;
+  }
+  function enemiesMove() {
+    for(const e of state.enemies) {
+      if(e.type==='s') continue;
+      const tryMove=dir=>({x:e.x+dir,y:e.y});
+      let next=tryMove(e.direction);
+      if(!inside(next.x,next.y)||['#','X','r'].includes(cell(next.x,next.y))) {
+        e.direction*=-1; next=tryMove(e.direction);
+      }
+      if(inside(next.x,next.y)&&!['#','X','r'].includes(cell(next.x,next.y))) e.x=next.x;
+    }
+  }
+  function move(dx,dy) {
+    if(state.finished||state.inChamber) return;
+    const remainingBefore=pending();
+    const target={x:state.player.x+dx,y:state.player.y+dy};
+    if(!inside(target.x,target.y)) return;
+    const t=cell(target.x,target.y);
+    if(t==='X') { announce('El borde de la mina es roca sólida. Busca otra ruta.'); return; }
+    if(t==='r'||t==='#') { if(!useTool(target,dx,dy)) return; }
+    else {
+      state.player=target;
+      if(t==='C') {
+        state.rescued++; state.tiles[target.y][target.x]='.';
+        announce(`¡Prisionero liberado! ${stories[state.level][state.rescuedHere++]}`);
+      }
+      else if(t==='G') { state.gems++; state.tiles[target.y][target.x]='.'; announce('¡Gema recogida! Sirve para activar el ascensor de esta planta.'); }
+      else if(t==='b') { state.tiles[target.y][target.x]='.'; state.hearts--; announce('¡Bomba escondida! Pierdes un corazón.'); if(state.hearts<=0) { state.finished=true; announce('La bomba te ha detenido. ¡Inténtalo de nuevo!'); } }
+      else if(t==='T') { state.inChamber=true;state.lamps=[true,false,true,false];announce('Has encontrado una cámara secreta. Resuelve su juego para abrir el cofre.');draw();return; }
+      else if(t==='.') announce('Avanzas por los túneles.');
+      if(t==='.' && (state.turn+target.x+target.y)%7===0) { state.stars++; announce('¡Encontraste una estrella entre el polvo!'); }
+    }
+    if(state.finished) { draw(); return; }
+    state.turn++;
+    if(state.invulnerable>0) state.invulnerable--;
+    enemiesMove();
+    danger();
+    if(!state.finished && remainingBefore>1 && pending()===1) {
+      guidePath(); announce('¡Queda un objetivo! Aparece tu amigo minero atrapado y abre la ruta dorada hacia lo que falta.');
+    }
+    if(!state.finished && remainingBefore===1 && pending()===0) {
+      guidePath(); announce('¡Misión completa! El minero traza la ruta dorada hasta el ascensor.');
+    }
+    if(!state.finished && same(state.player,state.exit)) {
+      if(pending()>0) announce('El ascensor espera: rescata a todos y recoge todas las gemas antes de bajar.');
+      else if(state.level===maps.length-1) {
+        state.finished=true; announce(`La mina desemboca en un búnker militar enterrado. Super Piluka y el minero abren el ascensor de evacuación: ${state.rescued} prisioneros salen de las celdas. Los planos muestran otros complejos bajo tierra... Continuará.`);
+      } else { load(state.level+1,state.hearts,state.stars,state.rescued,state.gems); return; }
+    }
+    draw();
+  }
+  function draw() {
+    document.querySelector('#floor').textContent=`⬇️ Planta ${state.level+1}/${maps.length}`;
+    document.querySelector('#mission').textContent=`🎯 Pendientes: ${pending()}`;
+    document.querySelector('#rescued').textContent=`🗝️ Libres: ${state.rescued}`;
+    document.querySelector('#gems').textContent=`💎 ${state.gems}`;
+    document.querySelector('#hearts').textContent=`❤️ ${state.hearts}`;
+    document.querySelector('#stars').textContent=`⭐ ${state.stars}`;
+    drawChamber();
+    const beams=scannerCells(); board.replaceChildren();
+    for(const item of ['pick','drill','dynamite']) document.querySelector(`#${item}-count`).textContent=state.inventory[item];
+    document.querySelectorAll('[data-tool]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.tool===state.tool)));
+    const icons={'X':'','r':'🪨','#':'🟫','C':'🔒','G':'💎','b':'💣','T':'🏛️','.':''};
+    for(let y=0;y<8;y++) for(let x=0;x<8;x++) {
+      const p={x,y}, tile=cell(x,y), e=state.enemies.find(e=>same(e,p));
+      const el=document.createElement('div'); el.className=`cell ${tile==='X'?'wall':tile==='#'?'earth':tile==='r'?'rock':''}`;
+      if(state.trail.has(key(x,y))) el.classList.add('trail');
+      if(same(p,state.exit)) el.classList.add('exit');
+      if(e?.type==='s') el.classList.add('scanner');
+      if(beams.has(key(x,y))) el.classList.add('danger');
+      el.textContent=same(p,state.player)?'🦸':e?(e.type==='s'?'🤖':'👷‍♂️'):same(p,state.exit)?(pending()<=1?'👷':'⬇️'):icons[tile];
+      el.setAttribute('role','gridcell');
+      el.setAttribute('aria-label',same(p,state.player)?'Super Piluka':e?(e.type==='s'?'Robot escáner':'Minero rojo'):same(p,state.exit)?(pending()<=1?'Amigo minero atrapado junto al ascensor':'Ascensor de descenso'):tile==='C'?'Prisionero':tile==='G'?'Gema':tile==='T'?'Cámara del tesoro':tile==='b'?'Bomba':tile==='r'?'Piedra':tile==='#'?'Tierra para picar':tile==='X'?'Roca sólida':'Pasillo');
+      if(tile==='r'||tile==='#') el.addEventListener('click',()=>{if(adjacent(state.player,p)) move(x-state.player.x,y-state.player.y);});
+      board.append(el);
+    }
+  }
+  document.querySelectorAll('[data-dir]').forEach(button=>button.addEventListener('click',()=>move(...button.dataset.dir.split(',').map(Number))));
+  document.querySelectorAll('[data-tool]').forEach(button=>button.addEventListener('click',()=>{state.tool=button.dataset.tool;draw();}));
+  document.querySelector('#restart').addEventListener('click',()=>load(0));
+  document.querySelector('#leave-chamber').addEventListener('click',()=>{state.inChamber=false;announce('Sales de la cámara. Puedes regresar para resolver el acertijo.');draw();});
+  document.addEventListener('keydown',event=>{
+    const dirs={ArrowUp:[0,-1],w:[0,-1],ArrowDown:[0,1],s:[0,1],ArrowLeft:[-1,0],a:[-1,0],ArrowRight:[1,0],d:[1,0]};
+    const dir=dirs[event.key]; if(dir) { event.preventDefault(); move(...dir); }
+  });
+  load(0);
+})();
+</script>
+</body>
+</html>
