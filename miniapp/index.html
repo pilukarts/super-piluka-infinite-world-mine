@@ -34,7 +34,7 @@
 <body>
 <main>
   <h1>⛏️ Super Piluka: el misterio de la mina</h1>
-  <p>Excava la mina bloque a bloque y abre tu propio laberinto. Descubre gemas, rescata prisioneros y esquiva a los invasores. Cuando completes casi toda la planta, tu amigo minero atrapado te mostrará una ruta.</p>
+  <p>Excava bloque a bloque. Entre las gemas y las rocas encontrarás prisioneros con historias sobre lo que oculta esta mina. Rescátalos y baja con ayuda de tu amigo minero atrapado.</p>
   <div class="hud"><span id="floor"></span><span id="mission"></span><span id="rescued"></span><span id="gems"></span><span id="hearts"></span><span id="stars"></span></div>
   <div id="board" role="grid" aria-label="Laberinto de la mina"></div>
   <section id="chamber" hidden aria-label="Juego de la cámara del tesoro">
@@ -67,6 +67,11 @@
     ["########","#P#G#C.#","###r#..#","#s#....#","#.T##R.#","##...G##","#C.br.E#","########"],
     ["########","#P#.r.G#","###.#C##","#s..#..#","##R#...#","#G.r.#C#","#.Tb..E#","########"]
   ];
+  const stories = [
+    ['«Oí motores debajo de la roca. Esta mina tiene máquinas que nunca vimos.»','«Los mineros rojos vigilan una puerta con números, no una veta de gemas.»'],
+    ['«Me trajeron aquí por un ascensor de carga. Había más gente tras el muro.»','«Vi planos: estos túneles rodean un edificio enterrado.»'],
+    ['«Hay celdas al otro lado del hormigón. Necesitamos una salida para todos.»','«El minero conoce la llave del ascensor de evacuación. ¡Ve con él!»']
+  ];
   const board = document.querySelector('#board');
   const msg = document.querySelector('#message');
   let state;
@@ -84,7 +89,7 @@
       if(t==='E') { exit={x,y}; tiles[y][x]='.'; }
       if(t==='R'||t==='s') { enemies.push({x,y,type:t,axis:t==='s'?'row':'patrol',direction:1}); tiles[y][x]='.'; }
     }
-    state={level,tiles,enemies,player,exit,hearts,stars,rescued,gems,turn:0,invulnerable:0,finished:false,tool:'hand',inventory:{pick:0,drill:0,dynamite:0},trail:new Set(),inChamber:false,lamps:[true,false,true,false]};
+    state={level,tiles,enemies,player,exit,hearts,stars,rescued,gems,turn:0,invulnerable:0,finished:false,tool:'hand',inventory:{pick:0,drill:0,dynamite:0},trail:new Set(),inChamber:false,lamps:[true,false,true,false],rescuedHere:0};
     announce(level===0?'La entrada está bloqueada. Pica la tierra para abrir tu primer túnel.':`Planta ${level+1}: abre camino para completar la misión.`);
     draw();
   }
@@ -202,7 +207,10 @@
     if(t==='r'||t==='#') { if(!useTool(target,dx,dy)) return; }
     else {
       state.player=target;
-      if(t==='C') { state.rescued++; state.tiles[target.y][target.x]='.'; announce('¡Prisionero liberado! Te cuenta que el núcleo oculta un secreto.'); }
+      if(t==='C') {
+        state.rescued++; state.tiles[target.y][target.x]='.';
+        announce(`¡Prisionero liberado! ${stories[state.level][state.rescuedHere++]}`);
+      }
       else if(t==='G') { state.gems++; state.tiles[target.y][target.x]='.'; announce('¡Gema recogida! Sirve para activar el ascensor de esta planta.'); }
       else if(t==='b') { state.tiles[target.y][target.x]='.'; state.hearts--; announce('¡Bomba escondida! Pierdes un corazón.'); if(state.hearts<=0) { state.finished=true; announce('La bomba te ha detenido. ¡Inténtalo de nuevo!'); } }
       else if(t==='T') { state.inChamber=true;state.lamps=[true,false,true,false];announce('Has encontrado una cámara secreta. Resuelve su juego para abrir el cofre.');draw();return; }
@@ -223,7 +231,7 @@
     if(!state.finished && same(state.player,state.exit)) {
       if(pending()>0) announce('El ascensor espera: rescata a todos y recoge todas las gemas antes de bajar.');
       else if(state.level===maps.length-1) {
-        state.finished=true; announce('¡Llegasteis al Núcleo Infinito! Los prisioneros están a salvo. Una luz de Pilukium revela una puerta sellada... Continuará.');
+        state.finished=true; announce(`La mina desemboca en un búnker militar enterrado. Super Piluka y el minero abren el ascensor de evacuación: ${state.rescued} prisioneros salen de las celdas. Los planos muestran otros complejos bajo tierra... Continuará.`);
       } else { load(state.level+1,state.hearts,state.stars,state.rescued,state.gems); return; }
     }
     draw();
