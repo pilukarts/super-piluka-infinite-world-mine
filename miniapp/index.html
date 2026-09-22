@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Super Piluka · El misterio de la mina</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background:#111421; color:#f9ebd2; }
+    * { box-sizing:border-box } body { margin:0; padding:16px; }
+    main { max-width:560px; margin:auto } h1 { font-size:1.6rem; margin:8px 0 }
+    p { line-height:1.45 } .hud { display:flex; flex-wrap:wrap; gap:8px; margin:14px 0 }
+    .hud span { padding:7px 10px; border-radius:12px; background:#282d42 }
+    #board { display:grid; grid-template-columns:repeat(8,1fr); gap:3px; padding:6px; border-radius:14px; background:#343049; touch-action:none }
+    .cell { aspect-ratio:1; display:grid; place-items:center; font-size:clamp(20px,6vw,34px); border-radius:7px; background:#383550; position:relative; user-select:none }
+    .wall { background:#1b1d2d } .rock { background:#635049 } .exit { background:#245a52 } .scanner { background:#714558 }
+    .danger::after { content:""; position:absolute; inset:2px; border:2px dashed #ff5e72; border-radius:6px; pointer-events:none }
+    #message { min-height:3em; padding:12px; margin:12px 0; border-radius:12px; background:#272b40 }
+    .controls { display:grid; grid-template-columns:repeat(3,60px); justify-content:center; gap:5px }
+    button { border:0; border-radius:12px; padding:12px; background:#7058c4; color:white; font-size:20px; cursor:pointer }
+    button:focus-visible { outline:3px solid #fbc968 } .up { grid-column:2 } .left { grid-column:1 } .down { grid-column:2 } .right { grid-column:3 }
+    .restart { display:block; margin:12px auto; font-size:15px; background:#3f4964 }
+    small { color:#bdbbd0 }
+  </style>
+</head>
+<body>
+<main>
+  <h1>⛏️ Super Piluka: el misterio de la mina</h1>
+  <p>Desciende con tu amigo minero. Rescata a los prisioneros, rompe las rocas y evita a los robots escáner y a los mineros rojos.</p>
+  <div class="hud"><span id="floor"></span><span id="rescued"></span><span id="hearts"></span><span id="stars"></span></div>
+  <div id="board" role="grid" aria-label="Laberinto de la mina"></div>
+  <div id="message" role="status" aria-live="polite"></div>
+  <div class="controls" aria-label="Movimiento">
+    <button class="up" data-dir="0,-1" aria-label="Arriba">↑</button>
+    <button class="left" data-dir="-1,0" aria-label="Izquierda">←</button>
+    <button class="down" data-dir="0,1" aria-label="Abajo">↓</button>
+    <button class="right" data-dir="1,0" aria-label="Derecha">→</button>
+  </div>
+  <button class="restart" id="restart">Empezar de nuevo</button>
+  <small>Teclado: flechas o WASD. Toca una roca para romperla desde una casilla vecina. El minero aliado te acompaña.</small>
+</main>
+<script>
+(() => {
+  'use strict';
+  const maps = [
+    ["########","#P.r...#","#.##.#C#","#..s.#.#","##.#...#","#R..#..#","#..C..E#","########"],
+    ["########","#P..#C.#","#.#r#..#","#s#....#","#..##R.#","##....##","#C..r.E#","########"],
+    ["########","#P..r..#","#.#.#C##","#s..#..#","##R#...#","#..r.#C#","#.....E#","########"]
+  ];
+  const board = document.querySelector('#board');
+  const msg = document.querySelector('#message');
+  let state;
+  const key = (x,y) => `${x},${y}`;
+  const same = (a,b) => a.x === b.x && a.y === b.y;
+  const adjacent = (a,b) => Math.abs(a.x-b.x)+Math.abs(a.y-b.y) === 1;
+  const inside = (x,y) => x>=0 && x<8 && y>=0 && y<8;
+  const cell = (x,y) => state.tiles[y][x];
+  function load(level, hearts=3, stars=0, rescued=0) {
+    const tiles=maps[level].map(row=>row.split(''));
+    const enemies=[]; let player, exit;
+    for(let y=0;y<8;y++) for(let x=0;x<8;x++) {
+      const t=tiles[y][x];
+      if(t==='P') { player={x,y}; tiles[y][x]='.'; }
+      if(t==='E') { exit={x,y}; tiles[y][x]='.'; }
+      if(t==='R'||t==='s') { enemies.push({x,y,type:t,axis:t==='s'?'row':'patrol',direction:1}); tiles[y][x]='.'; }
+    }
+    state={level,tiles,enemies,player,friend:{...player},exit,hearts,stars,rescued,turn:0,invulnerable:0,finished:false};
+    announce(level===0?'Piluka y su amigo entran en la mina. ¡Hay gente atrapada!':`Nivel ${level+1}: el misterio está más cerca.`);
+    draw();
+  }
+  function announce(text) { msg.textContent=text; }
+  function scannerCells() {
+    const marked=new Set();
+    for(const e of state.enemies.filter(e=>e.type==='s')) {
+      for(const dir of [-1,1]) {
+        for(let x=e.x+dir; inside(x,e.y) && cell(x,e.y)!=='#' && cell(x,e.y)!=='r'; x+=dir) marked.add(key(x,e.y));
+      }
+    }
+    return marked;
+  }
+  function danger() {
+    if(state.invulnerable>0) return false;
+    if(state.enemies.some(e=>same(e,state.player)) || scannerCells().has(key(state.player.x,state.player.y))) {
+      state.hearts--; state.invulnerable=2;
+      if(state.hearts<=0) { state.finished=true; announce('Los invasores te han detenido. ¡Vuelve a intentarlo!'); }
+      else announce('¡Cuidado! Has perdido un corazón. Tienes un turno para escapar.');
+      return true;
+    }
+    return false;
+  }
+  function enemiesMove() {
+    for(const e of state.enemies) {
+      if(e.type==='s') continue;
+      const tryMove=dir=>({x:e.x+dir,y:e.y});
+      let next=tryMove(e.direction);
+      if(!inside(next.x,next.y)||cell(next.x,next.y)==='#'||cell(next.x,next.y)==='r') {
+        e.direction*=-1; next=tryMove(e.direction);
+      }
+      if(inside(next.x,next.y)&&cell(next.x,next.y)!=='#'&&cell(next.x,next.y)!=='r') e.x=next.x;
+    }
+  }
+  function move(dx,dy) {
+    if(state.finished) return;
+    const target={x:state.player.x+dx,y:state.player.y+dy};
+    if(!inside(target.x,target.y)) return;
+    const t=cell(target.x,target.y);
+    if(t==='#') { announce('Un muro bloquea el camino.'); return; }
+    if(t==='r') { state.tiles[target.y][target.x]='.'; announce('Tu amigo minero rompe la roca.'); }
+    else {
+      state.friend={...state.player}; state.player=target;
+      if(t==='C') { state.rescued++; state.tiles[target.y][target.x]='.'; announce('¡Prisionero liberado! Te cuenta que el núcleo oculta un secreto.'); }
+      else if(t==='.') announce('Avanzas por los túneles.');
+      if(t==='.' && (state.turn+target.x+target.y)%7===0) { state.stars++; announce('¡Encontraste una estrella entre el polvo!'); }
+    }
+    state.turn++; if(state.invulnerable>0) state.invulnerable--;
+    enemiesMove(); danger();
+    if(!state.finished && same(state.player,state.exit)) {
+      if(state.tiles.flat().includes('C')) announce('La salida está aquí, pero todavía quedan prisioneros en este nivel.');
+      else if(state.level===maps.length-1) {
+        state.finished=true; announce('¡Llegasteis al Núcleo Infinito! Los prisioneros están a salvo. Una luz de Pilukium revela una puerta sellada... Continuará.');
+      } else { load(state.level+1,state.hearts,state.stars,state.rescued); return; }
+    }
+    draw();
+  }
+  function draw() {
+    document.querySelector('#floor').textContent=`🕳️ Nivel ${state.level+1}/${maps.length}`;
+    document.querySelector('#rescued').textContent=`🗝️ Libres: ${state.rescued}`;
+    document.querySelector('#hearts').textContent=`❤️ ${state.hearts}`;
+    document.querySelector('#stars').textContent=`⭐ ${state.stars}`;
+    const beams=scannerCells(); board.replaceChildren();
+    const icons={'#':'','r':'🪨','C':'🔒','.':''};
+    for(let y=0;y<8;y++) for(let x=0;x<8;x++) {
+      const p={x,y}, tile=cell(x,y), e=state.enemies.find(e=>same(e,p));
+      const el=document.createElement('div'); el.className=`cell ${tile==='#'?'wall':tile==='r'?'rock':''}`;
+      if(same(p,state.exit)) el.classList.add('exit');
+      if(e?.type==='s') el.classList.add('scanner');
+      if(beams.has(key(x,y))) el.classList.add('danger');
+      el.textContent=same(p,state.player)?'🦸':e?(e.type==='s'?'🤖':'👷‍♂️'):same(p,state.friend)?'⛏️':same(p,state.exit)?'🚪':icons[tile];
+      el.setAttribute('role','gridcell');
+      el.setAttribute('aria-label',same(p,state.player)?'Super Piluka':e?(e.type==='s'?'Robot escáner':'Minero rojo'):same(p,state.friend)?'Amigo minero':same(p,state.exit)?'Salida':tile==='C'?'Prisionero':tile==='r'?'Roca':tile==='#'?'Muro':'Pasillo');
+      if(tile==='r') el.addEventListener('click',()=>{if(adjacent(state.player,p)) move(x-state.player.x,y-state.player.y);});
+      board.append(el);
+    }
+  }
+  document.querySelectorAll('[data-dir]').forEach(button=>button.addEventListener('click',()=>move(...button.dataset.dir.split(',').map(Number))));
+  document.querySelector('#restart').addEventListener('click',()=>load(0));
+  document.addEventListener('keydown',event=>{
+    const dirs={ArrowUp:[0,-1],w:[0,-1],ArrowDown:[0,1],s:[0,1],ArrowLeft:[-1,0],a:[-1,0],ArrowRight:[1,0],d:[1,0]};
+    const dir=dirs[event.key]; if(dir) { event.preventDefault(); move(...dir); }
+  });
+  load(0);
+})();
+</script>
+</body>
+</html>
