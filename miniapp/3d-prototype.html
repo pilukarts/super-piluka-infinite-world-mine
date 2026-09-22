@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Super Piluka · Mina 3D</title>
+  <style>
+    :root{color-scheme:dark;--violet:#6e45a6;--gold:#ffc857;--ink:#0b0b16}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 50% -20%,#352348,#090a12 60%);font:16px system-ui;color:#fff;overflow:hidden}
+    #game{position:relative;width:100vw;height:100dvh;min-height:560px}
+    canvas{display:block;width:100%;height:100%;image-rendering:pixelated;touch-action:none}
+    .top{position:absolute;inset:12px 12px auto;display:flex;gap:8px;flex-wrap:wrap;pointer-events:none}
+    .chip{padding:8px 11px;border:1px solid #ffffff26;border-radius:12px;background:#111525d9;box-shadow:0 4px 18px #0008;font-weight:700}
+    .mission{color:#ffe4a2}.tools{position:absolute;left:50%;bottom:max(14px,env(safe-area-inset-bottom));transform:translateX(-50%);display:flex;gap:8px}
+    button{border:1px solid #ffffff24;border-radius:13px;background:#24253b;color:#fff;padding:11px 14px;font-weight:800;box-shadow:0 5px 14px #0008;cursor:pointer}
+    button.active{background:#8251bb;outline:2px solid #ffd86d}button:disabled{opacity:.45}
+    #dialog{position:absolute;left:14px;right:14px;bottom:82px;max-width:720px;margin:auto;display:none;grid-template-columns:104px 1fr;gap:12px;padding:12px;border:2px solid #e7b85d;border-radius:16px;background:#121522f2;box-shadow:0 10px 40px #000b}
+    #dialog.show{display:grid}.portrait{width:104px;height:104px;object-fit:cover;object-position:50% 22%;border-radius:12px;background:#20192e;border:1px solid #ffffff33;image-rendering:pixelated}
+    #dialog h2{font-size:15px;color:#ffd76a;margin:0 0 5px;text-transform:uppercase;letter-spacing:.08em}#dialog p{margin:0;line-height:1.35}
+    #dialog button{margin-top:9px;padding:7px 11px}.hint{position:absolute;right:14px;top:64px;width:min(280px,46vw);padding:10px;border-radius:12px;background:#10131fd9;color:#cdd0df;font-size:13px}
+    #toast{position:absolute;left:50%;top:88px;transform:translateX(-50%);padding:9px 14px;border-radius:12px;background:#0c0f1ee6;color:#ffe6a3;opacity:0;transition:.25s;pointer-events:none;text-align:center}
+    #toast.show{opacity:1}.vignette{position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 110px 35px #000c}
+    @media(max-width:620px){.hint{display:none}.chip{font-size:13px;padding:6px 8px}.tools button{padding:9px;font-size:12px}#dialog{grid-template-columns:74px 1fr}.portrait{width:74px;height:74px}}
+  </style>
+</head>
+<body><main id="game">
+  <canvas id="view" aria-label="Mina isométrica 3D"></canvas>
+  <div class="top"><span class="chip mission" id="mission">PLANTA 01 · ENCUENTRA EL CAMINO</span><span class="chip" id="gems">GEMAS 0/3</span><span class="chip" id="rescues">RESCATES 0/1</span><span class="chip" id="danger">ESTABLE</span></div>
+  <div class="hint">Toca un bloque cercano para picarlo. Arrastra para mover la cámara. Las grietas anuncian un derrumbe.</div>
+  <div id="toast" role="status"></div>
+  <section id="dialog" aria-live="polite"><img class="portrait" src="../assets/ask-chat-image%20(1).png" alt="Amigo minero"><div><h2 id="speaker">MILO · MINERO ATRAPADO</h2><p id="line"></p><button id="continue">Continuar</button></div></section>
+  <nav class="tools" aria-label="Herramientas"><button class="active" data-tool="pick">PICO</button><button data-tool="tnt" disabled>TNT 0</button><button data-tool="drill" disabled>TALADRO 0</button></nav>
+  <div class="vignette"></div>
+</main>
+<script>
+(()=>{'use strict';
+const canvas=document.querySelector('#view'),ctx=canvas.getContext('2d');
+const W=11,H=9,TW=78,TH=39,BH=42;
+const map=[
+ '###########',
+ '#P#########',
+ '###########',
+ '###G#######',
+ '#####.#####',
+ '##T..R###G#',
+ '#####.#####',
+ '####C...GE#',
+ '###########'
+].map(r=>r.split(''));
+let cam={x:0,y:-25,zoom:1},drag=null,player={x:1,y:1},selected='pick',gems=0,rescues=0,tnt=0,drill=0,turn=0,collapse=false,shake=0,particles=[],dialogStep=0;
+for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(map[y][x]==='P')map[y][x]='.';
+const palette={top:'#754e34',left:'#3e2b25',right:'#563528',edge:'#a66d3e',floor:'#282438',crack:'#ff754f'};
+function resize(){const d=Math.min(devicePixelRatio||1,2);canvas.width=innerWidth*d;canvas.height=innerHeight*d;ctx.setTransform(d,0,0,d,0,0);draw()}
+function iso(x,y,z=0){const cx=innerWidth/2+cam.x,cy=innerHeight*.30+cam.y;return{x:cx+(x-y)*TW*.5*cam.zoom,y:cy+(x+y)*TH*.5*cam.zoom-z*cam.zoom}}
+function poly(points,fill,stroke){ctx.beginPath();points.forEach((p,i)=>(i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)));ctx.closePath();ctx.fillStyle=fill;ctx.fill();if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=1.5;ctx.stroke()}}
+function block(x,y,broken=false){const a=iso(x,y,BH),b=iso(x+1,y,BH),c=iso(x+1,y+1,BH),d=iso(x,y+1,BH),aa=iso(x,y,0),bb=iso(x+1,y,0),cc=iso(x+1,y+1,0),dd=iso(x,y+1,0);poly([a,d,dd,aa],palette.left);poly([b,c,cc,bb],palette.right);poly([a,b,c,d],broken?'#5a332d':palette.top,palette.edge);if(broken){ctx.strokeStyle=palette.crack;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo((a.x+c.x)/2,(a.y+c.y)/2);ctx.lineTo(d.x+13,d.y+5);ctx.moveTo((a.x+c.x)/2,(a.y+c.y)/2);ctx.lineTo(b.x-18,b.y+8);ctx.stroke()}}
+function floor(x,y){const a=iso(x,y),b=iso(x+1,y),c=iso(x+1,y+1),d=iso(x,y+1);poly([a,b,c,d],palette.floor,'#3c3651')}
+function billboard(x,y,color,label,size=17){const p=iso(x+.5,y+.5,8),s=size*cam.zoom;ctx.save();ctx.translate(p.x,p.y);ctx.fillStyle='#0009';ctx.beginPath();ctx.ellipse(0,7,s*.75,s*.3,0,0,Math.PI*2);ctx.fill();ctx.fillStyle=color;ctx.fillRect(-s*.36,-s*1.05,s*.72,s*.9);ctx.fillStyle='#f2bd86';ctx.fillRect(-s*.29,-s*1.5,s*.58,s*.5);ctx.fillStyle='#f6cb3d';ctx.fillRect(-s*.38,-s*1.58,s*.76,s*.18);ctx.fillStyle='#111';ctx.font=`${Math.max(9,s*.45)}px monospace`;ctx.textAlign='center';ctx.fillText(label,0,-s*1.78);ctx.restore()}
+function item(x,y,type){const p=iso(x+.5,y+.5,8),s=cam.zoom;ctx.save();ctx.translate(p.x,p.y);if(type==='G'){ctx.fillStyle='#62e9ff';poly([{x:0,y:-17*s},{x:13*s,y:-5*s},{x:7*s,y:13*s},{x:-7*s,y:13*s},{x:-13*s,y:-5*s}],'#5eeaff','#d9ffff')}else if(type==='C'){ctx.fillStyle='#d0c1aa';ctx.fillRect(-12*s,-22*s,24*s,32*s);ctx.fillStyle='#24202e';ctx.fillRect(-7*s,-17*s,4*s,22*s);ctx.fillRect(3*s,-17*s,4*s,22*s)}else if(type==='T'){ctx.fillStyle='#d93636';ctx.fillRect(-11*s,-11*s,22*s,22*s);ctx.fillStyle='#ffd34e';ctx.fillText('TNT',0,0)}else if(type==='E'){ctx.fillStyle='#5ad497';ctx.fillRect(-15*s,-8*s,30*s,16*s);ctx.fillStyle='#fff';ctx.fillText('↓',0,4*s)}ctx.restore()}
+function draw(){ctx.clearRect(0,0,innerWidth,innerHeight);ctx.save();if(shake)ctx.translate((Math.random()-.5)*shake,(Math.random()-.5)*shake);const cells=[];for(let y=0;y<H;y++)for(let x=0;x<W;x++)cells.push({x,y,k:x+y});cells.sort((a,b)=>a.k-b.k||a.x-b.x);for(const {x,y} of cells){const t=map[y][x];if(t==='#')block(x,y,collapse&&((x===5&&y===4)||(x===6&&y===4)));else{floor(x,y);if('GCTE'.includes(t))item(x,y,t);if(t==='R')billboard(x,y,'#9b2537','ROJO',15)}}billboard(player.x,player.y,'#6c39a1','PILUKA',18);ctx.restore();for(const p of particles){ctx.fillStyle=p.c;ctx.fillRect(p.x,p.y,p.s,p.s)}}
+function toast(s){const e=document.querySelector('#toast');e.textContent=s;e.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>e.classList.remove('show'),1700)}
+function say(s){document.querySelector('#line').textContent=s;document.querySelector('#dialog').classList.add('show')}
+const intro=['Piluka, esta galería está sellada. Tendrás que picar para encontrar el camino.','Escucha la roca: las grietas naranjas anuncian un derrumbe. Si tiembla, aléjate.','Hay herramientas escondidas. La TNT abre cámaras… pero también puede despertar toda la mina.'];
+document.querySelector('#continue').onclick=()=>{dialogStep++;if(dialogStep<intro.length)say(intro[dialogStep]);else document.querySelector('#dialog').classList.remove('show')};
+function near(x,y){return Math.abs(x-player.x)+Math.abs(y-player.y)===1}
+function hit(x,y){if(x<0||y<0||x>=W||y>=H)return;const t=map[y][x];if(t==='#'&&near(x,y)){map[y][x]='.';turn++;burst(x,y);toast('¡Bloque excavado!');if(turn===4)triggerCollapse();draw();return}if(t!== '#'&&near(x,y)){player={x,y};if(t==='G'){gems++;map[y][x]='.';document.querySelector('#gems').textContent=`GEMAS ${gems}/3`;toast('Gema de Pilukium encontrada')}if(t==='C'){rescues++;map[y][x]='.';document.querySelector('#rescues').textContent=`RESCATES ${rescues}/1`;say('Gracias… debajo de esta mina hay una puerta militar. Los mineros rojos la vigilan.')}if(t==='T'){tnt++;map[y][x]='.';const b=document.querySelector('[data-tool=tnt]');b.disabled=false;b.textContent=`TNT ${tnt}`;toast('TNT encontrada')}draw()}}
+function burst(x,y){const p=iso(x+.5,y+.5,BH);for(let i=0;i<22;i++)particles.push({x:p.x,y:p.y,dx:(Math.random()-.5)*6,dy:-Math.random()*5,s:2+Math.random()*5,c:i%3?'#8c5a35':'#d49a59',life:35})}
+function triggerCollapse(){collapse=true;shake=16;document.querySelector('#danger').textContent='⚠ DERRUMBE';document.querySelector('#danger').style.color='#ff7667';say('¡Piluka, atrás! La galería está cediendo. El derrumbe puede abrir otra cámara.');setTimeout(()=>{shake=5;map[4][5]='.';map[4][6]='.';burst(5,4);burst(6,4)},850);setTimeout(()=>{shake=0;collapse=false;document.querySelector('#danger').textContent='ESTABLE';document.querySelector('#danger').style.color='';draw()},1800)}
+function screenToCell(mx,my){let best=null,dist=1e9;for(let y=0;y<H;y++)for(let x=0;x<W;x++){const p=iso(x+.5,y+.5,map[y][x]==='#'?BH:0),d=(p.x-mx)**2+(p.y-my)**2;if(d<dist){dist=d;best={x,y}}}return dist<2600?best:null}
+canvas.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY,moved:false}});canvas.addEventListener('pointermove',e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(Math.abs(dx)+Math.abs(dy)>5)drag.moved=true;if(drag.moved){cam.x+=dx;cam.y+=dy;drag.x=e.clientX;drag.y=e.clientY;draw()}});canvas.addEventListener('pointerup',e=>{if(drag&&!drag.moved){const c=screenToCell(e.clientX,e.clientY);if(c)hit(c.x,c.y)}drag=null});canvas.addEventListener('wheel',e=>{e.preventDefault();cam.zoom=Math.max(.65,Math.min(1.35,cam.zoom-e.deltaY*.001));draw()},{passive:false});
+document.querySelectorAll('[data-tool]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-tool]').forEach(x=>x.classList.remove('active'));b.classList.add('active');selected=b.dataset.tool});
+function tick(){for(let i=particles.length-1;i>=0;i--){const p=particles[i];p.x+=p.dx;p.y+=p.dy;p.dy+=.2;if(--p.life<=0)particles.splice(i,1)}if(particles.length||shake)draw();requestAnimationFrame(tick)}
+addEventListener('resize',resize);resize();say(intro[0]);tick();
+})();
+</script></body></html>
